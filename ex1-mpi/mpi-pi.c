@@ -38,44 +38,69 @@
    centered ad the origin with radius 1 */
 int generate_points( int n ) 
 {
-    int i, n_inside = 0;
-    for (i=0; i<n; i++) {
-        const double x = (rand()/(double)RAND_MAX * 2.0) - 1.0;
-        const double y = (rand()/(double)RAND_MAX * 2.0) - 1.0;
-        if ( x*x + y*y < 1.0 ) {
-            n_inside++;
-        }
+  int i, n_inside = 0;
+  for (i=0; i<n; i++) {
+    const double x = (rand()/(double)RAND_MAX * 2.0) - 1.0;
+    const double y = (rand()/(double)RAND_MAX * 2.0) - 1.0;
+    if ( x*x + y*y < 1.0 ) {
+      n_inside++;
     }
-    return n_inside;
+  }
+  return n_inside;
 }
 
 int main( int argc, char *argv[] )
 {
-    int my_rank, comm_sz;
-    int inside = 0, npoints = 1000000;
-    double pi_approx;
-    
-    MPI_Init( &argc, &argv );	
-    MPI_Comm_rank( MPI_COMM_WORLD, &my_rank );
-    MPI_Comm_size( MPI_COMM_WORLD, &comm_sz );
+  int my_rank, comm_sz;
+  int inside = 0, npoints = 1000000;
+  double pi_approx;
 
-    if ( argc > 1 ) {
-        npoints = atoi(argv[1]);
+  MPI_Init( &argc, &argv );	
+  MPI_Comm_rank( MPI_COMM_WORLD, &my_rank );
+  MPI_Comm_size( MPI_COMM_WORLD, &comm_sz );
+
+  if ( argc > 1 ) {
+    npoints = atoi(argv[1]);
+  }
+
+  /* Each process initializes the pseudo-random number generator; if
+     we don't do this (or something similar), each process would
+     produce the exact same sequence of pseudo-random numbers! */
+  srand(time(NULL));
+
+  /* [TODO] This is not a true parallel version; the master does
+     everything */
+
+  if (0 == my_rank) {
+    const int start = npoints * my_rank / comm_sz;
+    const int end = (my_rank + 1) * npoints / comm_sz;
+    const int size = end - start;
+    inside = generate_points(size);
+    for (int p = 1; p < comm_sz; p++) {
+      int remote_inside;
+      MPI_Recv(&remote_inside, 1, MPI_INT, p, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      inside += remote_inside;
     }
+    pi_approx = 4.0 * inside / (double)npoints;
+    printf("PI approximation is %f (true value=%f, rel error=%.3f%%)\n", pi_approx, M_PI, 100.0*fabs(pi_approx-M_PI)/M_PI);
 
-    /* Each process initializes the pseudo-random number generator; if
-       we don't do this (or something similar), each process would
-       produce the exact same sequence of pseudo-random numbers! */
-    srand(time(NULL));
+  } else {
+    const int start = npoints * my_rank / comm_sz;
+    const int end = (my_rank + 1) * npoints / comm_sz;
+    const int size = end - start;
+    int local_inside = generate_points(size);
+    printf("Proc %d calculate\n", my_rank);
+    MPI_Send(&local_inside, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+  }
 
-    /* [TODO] This is not a true parallel version; the master does
-       everything */
-    if ( 0 == my_rank ) {
-        inside = generate_points(npoints);
-        pi_approx = 4.0 * inside / (double)npoints;
-        printf("PI approximation is %f (true value=%f, rel error=%.3f%%)\n", pi_approx, M_PI, 100.0*fabs(pi_approx-M_PI)/M_PI);
-    }
-    
-    MPI_Finalize();		
-    return 0;
+  //if ( 0 == my_rank ) {
+  //  inside = generate_points(npoints);
+  //  pi_approx = 4.0 * inside / (double)npoints;
+  //  printf("PI approximation is %f (true value=%f, rel error=%.3f%%)\n", pi_approx, M_PI, 100.0*fabs(pi_approx-M_PI)/M_PI);
+  //}
+
+  MPI_Finalize();
+  return 0;
 }
+
+// vim: set nofoldenable :
