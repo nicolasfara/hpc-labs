@@ -1,5 +1,5 @@
- bbox-gen
- mpi-bbox
- mpi-dot
- mpi-mandelbrot
- mpi-pi
+ ./bbox-gen
+ ./mpi-bbox
+ ./mpi-dot
+ ./mpi-mandelbrot
+ ./mpi-pi
