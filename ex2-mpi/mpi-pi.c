@@ -36,44 +36,56 @@
 /* Generate |n| random points within the square with corners (-1, -1),
    (1, 1); return the number of points that fall inside the circle
    centered ad the origin with radius 1 */
-int generate_points( int n ) 
+int generate_points( int n )
 {
-    int i, n_inside = 0;
-    for (i=0; i<n; i++) {
-        const double x = (rand()/(double)RAND_MAX * 2.0) - 1.0;
-        const double y = (rand()/(double)RAND_MAX * 2.0) - 1.0;
-        if ( x*x + y*y < 1.0 ) {
-            n_inside++;
-        }
+  int i, n_inside = 0;
+  for (i = 0; i < n; i++) {
+    const double x = (rand()/(double)RAND_MAX * 2.0) - 1.0;
+    const double y = (rand()/(double)RAND_MAX * 2.0) - 1.0;
+    if ( x*x + y*y < 1.0 ) {
+      n_inside++;
     }
-    return n_inside;
+  }
+  return n_inside;
 }
 
 int main( int argc, char *argv[] )
 {
-    int my_rank, comm_sz;
-    int inside = 0, npoints = 1000000;
-    double pi_approx;
-    
-    MPI_Init( &argc, &argv );	
-    MPI_Comm_rank( MPI_COMM_WORLD, &my_rank );
-    MPI_Comm_size( MPI_COMM_WORLD, &comm_sz );
+  int my_rank, comm_sz;
+  int inside = 0, npoints = 1000000;
+  double pi_approx;
 
-    if ( argc > 1 ) {
-        npoints = atoi(argv[1]);
-    }
+  MPI_Init( &argc, &argv );
+  MPI_Comm_rank( MPI_COMM_WORLD, &my_rank );
+  MPI_Comm_size( MPI_COMM_WORLD, &comm_sz );
 
-    /* Initialize the pseudo-random number generator */
-    srand(time(NULL));
+  if ( argc > 1 ) {
+    npoints = atoi(argv[1]);
+  }
 
-    /* [TODO] This is not a true parallel version; the master does
-       everything */
-    if ( 0 == my_rank ) {
-        inside = generate_points(npoints);
-        pi_approx = 4.0 * inside / (double)npoints;
-        printf("PI approximation is %f (true value=%f, rel error=%.3f%%)\n", pi_approx, M_PI, 100.0*fabs(pi_approx-M_PI)/M_PI);
-    }
-    
-    MPI_Finalize();		
-    return 0;
+  /* Initialize the pseudo-random number generator */
+  srand(time(NULL));
+
+  /* [TODO] This is not a true parallel version; the master does
+     everything */
+
+  const int start = npoints * my_rank / comm_sz;
+  const int end = npoints * (my_rank + 1) / comm_sz;
+  const int size = end - start;
+
+  int local_inside = generate_points(size);
+
+  MPI_Reduce(&local_inside, &inside, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+
+  if ( 0 == my_rank ) {
+    //inside = generate_points(npoints);
+    pi_approx = 4.0 * inside / (double)npoints;
+    printf("PI approximation is %f (true value=%f, rel error=%.3f%%)\n", pi_approx, M_PI, 100.0*fabs(pi_approx-M_PI)/M_PI);
+  }
+
+  MPI_Finalize();
+  return 0;
 }
+
+
+// vim: set nofoldenable :
