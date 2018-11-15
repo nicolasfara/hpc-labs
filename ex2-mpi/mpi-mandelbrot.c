@@ -30,7 +30,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-const int MAXIT = 100;
+const int MAXIT = 100000;
 
 typedef struct {
   uint8_t r;  /* red   */
@@ -56,6 +56,25 @@ const int colors[][3] = {
   {204, 128, 0},
   {153, 87, 0},
   {106, 52, 3} };
+
+const int colors[][3] = {
+  {61, 121, 255}, /* r, g, b */
+  {25, 7, 26},``
+  {9, 1, 47},
+  {4, 4, 73},
+  {0, 7, 100},
+  {12, 44, 138},
+  {24, 82, 177},
+  {57, 125, 209},
+  {134, 181, 229},
+  {211, 236, 248},
+  {241, 233, 191},
+  {248, 201, 95},
+  {255, 170, 0},
+  {204, 128, 0},
+  {153, 87, 0},
+  {106, 52, 3} };
+
 const int NCOLORS = sizeof(colors)/sizeof(colors[0]);
 
 /*
@@ -123,7 +142,7 @@ int main( int argc, char *argv[] )
     ysize = 1024;
   }
 
-  xsize = ysize * 1.4;
+  xsize = ysize * 1.777777778;
 
   if ( 0 == my_rank ) {
     out = fopen(fname, "w");
