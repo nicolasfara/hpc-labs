@@ -70,7 +70,7 @@ void inplace_reverse( int *in, int n )
 __global__ void inplace_reverse_gpu( int *in, int n )
 {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
-  if (index < n) {
+  if (index < n / 2) {
     int tmp = in[n - 1 - index];
     in[n - 1 - index] = in[index];
     in[index] = tmp;
