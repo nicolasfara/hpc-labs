@@ -31,91 +31,127 @@
 #include <math.h>
 #include <assert.h>
 
+#define BLKSIZE 1024
+
 /* Reverse in[] into out[].
    [TODO] This function should be rewritten as a kernel. */
 void reverse( int *in, int *out, int n )
 {
-    int i;
-    for (i=0; i<n; i++) {
-        out[n - 1 - i] = in[i];
-    }
+  int i;
+  for (i=0; i<n; i++) {
+    out[n - 1 - i] = in[i];
+  }
+}
+
+__global__ void reverse_gpu( int *in, int *out, int n )
+{
+  int index = threadIdx.x + blockIdx.x * blockDim.x;
+  if (index < n) {
+    out[n - 1 - index] = in[index];
+  }
 }
 
 /* In-place reversal of in[] into itself.
    [TODO] This function should be rewritten as a kernel. */
 void inplace_reverse( int *in, int n )
 {
-    int i = 0, j = n-1;
-    while (i < j) {
-        int tmp = in[j];
-        in[j] = in[i];
-        in[i] = tmp;
-        j--;
-        i++;
-    }
+  int i = 0, j = n-1;
+  while (i < j) {
+    int tmp = in[j];
+    in[j] = in[i];
+    in[i] = tmp;
+    j--;
+    i++;
+  }
+}
+
+/* In-place reversal of in[] into itself.
+   [TODO] This function should be rewritten as a kernel. */
+__global__ void inplace_reverse_gpu( int *in, int n )
+{
+  int index = threadIdx.x + blockIdx.x * blockDim.x;
+  if (index < n) {
+    int tmp = in[n - 1 - index];
+    in[n - 1 - index] = in[index];
+    in[index] = tmp;
+  }
 }
 
 void fill( int *x, int n )
 {
-    int i;
-    for (i=0; i<n; i++) {
-        x[i] = i;
-    }
+  int i;
+  for (i=0; i<n; i++) {
+    x[i] = i;
+  }
 }
 
 int check( int *x, int n )
 {
-    int i;
-    for (i=0; i<n; i++) {
-        if (x[i] != n - 1 - i) {
-            fprintf(stderr, "Test FAILED: x[%d]=%d, expected %d\n", i, x[i], n-1-i);
-            return 0;
-        }
+  int i;
+  for (i=0; i<n; i++) {
+    if (x[i] != n - 1 - i) {
+      fprintf(stderr, "Test FAILED: x[%d]=%d, expected %d\n", i, x[i], n-1-i);
+      return 0;
     }
-    printf("Test OK\n");
-    return 1;
+  }
+  printf("Test OK\n");
+  return 1;
 }
 
 int main( int argc, char* argv[] )
 {
-    int *h_in, *h_out;  /* host copy of array in[] and out[] */
-    int n = 1024*1024;
-    const int max_len = 512*1024*1024;
-    
-    if ( argc > 2 ) {
-        fprintf(stderr, "Usage: %s [n]\n", argv[0]);
-        return EXIT_FAILURE;
-    }
+  int *h_in, *h_out, *dh_in, *dh_out;  /* host copy of array in[] and out[] */
+  int n = 1024*1024;
+  const int max_len = 512*1024*1024;
 
-    if ( argc > 1 ) {
-        n = atoi(argv[1]);
-    }
+  if ( argc > 2 ) {
+    fprintf(stderr, "Usage: %s [n]\n", argv[0]);
+    return EXIT_FAILURE;
+  }
 
-    if ( n > max_len ) {
-        fprintf(stderr, "FATAL: the maximum length is %d\n", max_len);
-        return EXIT_FAILURE;
-    }
-    
-    const size_t size = n * sizeof(*h_in);
+  if ( argc > 1 ) {
+    n = atoi(argv[1]);
+  }
 
-    /* Allocate host copy of in[] and out[] */
-    h_in = (int*)malloc(size); assert(h_in);
-    fill(h_in, n);
-    h_out = (int*)malloc(size); assert(h_out);
+  if ( n > max_len ) {
+    fprintf(stderr, "FATAL: the maximum length is %d\n", max_len);
+    return EXIT_FAILURE;
+  }
 
-    /* Reverse
-       [TODO] Rewrite as a kernel launch. */
-    printf("Reverse %d elements... ", n);
-    reverse(h_in, h_out, n);    
-    check(h_out, n);
+  const size_t size = n * sizeof(*h_in);
 
-    /* In-place reverse 
-       [TODO] Rewrite as a kernel launch. */
-    printf("In-place reverse %d elements... ", n);
-    inplace_reverse(h_in, n);    
-    check(h_in, n);
+  /* Allocate host copy of in[] and out[] */
+  h_in = (int*)malloc(size); assert(h_in);
+  fill(h_in, n);
+  h_out = (int*)malloc(size); assert(h_out);
 
-    /* Cleanup */
-    free(h_in); free(h_out);
-    return EXIT_SUCCESS;
+  cudaMalloc((void **)&dh_in, size);
+  cudaMalloc((void **)&dh_out, size);
+
+  cudaMemcpy(dh_in, h_in, size, cudaMemcpyHostToDevice);
+
+
+  /* Reverse
+     [TODO] Rewrite as a kernel launch. */
+  printf("Reverse %d elements... ", n);
+  //reverse(h_in, h_out, n);
+  reverse_gpu<<<(n + BLKSIZE - 1)/BLKSIZE, BLKSIZE>>>(dh_in, dh_out, n);
+
+  cudaMemcpy(h_out, dh_out, size, cudaMemcpyDeviceToHost);
+
+  check(h_out, n);
+
+  /* In-place reverse 
+     [TODO] Rewrite as a kernel launch. */
+  printf("In-place reverse %d elements... ", n);
+  inplace_reverse_gpu<<<(n/2 + BLKSIZE - 1)/BLKSIZE, BLKSIZE>>>(dh_in, n);
+  cudaMemcpy(h_in, dh_in, size, cudaMemcpyDeviceToHost);
+  check(h_in, n);
+
+  /* Cleanup */
+  free(h_in); free(h_out);
+  cudaFree(dh_in);
+  cudaFree(dh_out);
+
+  return EXIT_SUCCESS;
 }

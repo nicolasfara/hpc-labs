@@ -110,7 +110,7 @@ int main( int argc, char* argv[] )
   double start = hpc_gettime();
 
   printf("Computing the dot product of %d elements... ", n);
-  dot<<<N / blksize, blksize>>>(_tmp, _x, _y, n);
+  dot<<<(n + blksize - 1) / blksize, blksize>>>(_tmp, _x, _y, n);
   CudaCheckError();
   cudaDeviceSynchronize();
 

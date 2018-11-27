@@ -31,30 +31,59 @@
 #include <stdlib.h>
 #include <assert.h>
 
+#define BLKSIZE 512
+
 /* if *a > *b, swap them. Otherwise do nothing */
 void cmp_and_swap( int* a, int* b )
 {
-    if ( *a > *b ) {
-        int tmp = *a;
-        *a = *b;
-        *b = tmp;
-    }
+  if ( *a > *b ) {
+    int tmp = *a;
+    *a = *b;
+    *b = tmp;
+  }
 }
 
 /* Odd-even transposition sort */
 void odd_even_step( int* v, int n, int phase )
 {
-    if ( phase % 2 == 0 ) {
-        /* (even, odd) comparisons */
-        for (int i=0; i<n-1; i += 2 ) {
-            cmp_and_swap( &v[i], &v[i+1] );
-        }
-    } else {
-        /* (odd, even) comparisons */
-        for (int i=1; i<n-1; i += 2 ) {
-            cmp_and_swap( &v[i], &v[i+1] );
-        }
+  if ( phase % 2 == 0 ) {
+    /* (even, odd) comparisons */
+    for (int i=0; i<n-1; i += 2 ) {
+      cmp_and_swap( &v[i], &v[i+1] );
     }
+  } else {
+    /* (odd, even) comparisons */
+    for (int i=1; i<n-1; i += 2 ) {
+      cmp_and_swap( &v[i], &v[i+1] );
+    }
+  }
+}
+
+/* Odd-even transposition sort */
+__global__ void odd_even_step_bad( int* v, int n, int phase )
+{
+  const int index = threadIdx.x + blockIdx.x * blockDim.x;
+  if (index < n - 1 && index % 2 == phase % 2) {
+    if ( v[index] > v[index + 1] ) {
+      int tmp = v[index];
+      v[index] = v[index + 1];
+      v[index + 1] = tmp;
+    }
+  }
+}
+
+/* Odd-even transposition sort */
+__global__ void odd_even_step_good( int* v, int n, int phase )
+{
+  const int index = (threadIdx.x + blockIdx.x * blockDim.x);
+  const int i = 2 * index + (phase % 2);
+  if (i < n - 1) {
+    if ( v[i] > v[i + 1] ) {
+      int tmp = v[i];
+      v[i] = v[i + 1];
+      v[i + 1] = tmp;
+    }
+  }
 }
 
 /**
@@ -62,7 +91,7 @@ void odd_even_step( int* v, int n, int phase )
  */
 int randab(int a, int b)
 {
-    return a + (rand() % (b-a+1));
+  return a + (rand() % (b-a+1));
 }
 
 /**
@@ -70,16 +99,16 @@ int randab(int a, int b)
  */
 void fill( int *x, int n )
 {
-    int i, j, tmp;
-    for (i=0; i<n; i++) {
-        x[i] = i;
-    }
-    for(i=0; i<n-1; i++) {
-        j = randab(i, n-1);
-        tmp = x[i];
-        x[i] = x[j];
-        x[j] = tmp;
-    }
+  int i, j, tmp;
+  for (i=0; i<n; i++) {
+    x[i] = i;
+  }
+  for(i=0; i<n-1; i++) {
+    j = randab(i, n-1);
+    tmp = x[i];
+    x[i] = x[j];
+    x[j] = tmp;
+  }
 }
 
 /**
@@ -87,56 +116,65 @@ void fill( int *x, int n )
  */
 int check( int *x, int n )
 {
-    int i;
-    for (i=0; i<n; i++) {
-        if (x[i] != i) {
-            fprintf(stderr, "Check FAILED: x[%d]=%d, expected %d\n", i, x[i], i);
-            return 0;
-        }
+  int i;
+  for (i=0; i<n; i++) {
+    if (x[i] != i) {
+      fprintf(stderr, "Check FAILED: x[%d]=%d, expected %d\n", i, x[i], i);
+      return 0;
     }
-    printf("Check OK\n");
-    return 1;
+  }
+  printf("Check OK\n");
+  return 1;
 }
 
 int main( int argc, char *argv[] ) 
 {
-    int *x;
-    int phase, n = 128*1024;
-    const int max_len = 512*1024*1024;
-    double tstart, elapsed;
+  int *x, *d_x;
+  int phase, n = 128*1024;
+  const int max_len = 512*1024*1024;
+  double tstart, elapsed;
 
-    if ( argc > 2 ) {
-        fprintf(stderr, "Usage: %s [len]\n", argv[0]);
-        return EXIT_FAILURE;
-    }
+  if ( argc > 2 ) {
+    fprintf(stderr, "Usage: %s [len]\n", argv[0]);
+    return EXIT_FAILURE;
+  }
 
-    if ( argc > 1 ) {
-        n = atoi(argv[1]);
-    }
+  if ( argc > 1 ) {
+    n = atoi(argv[1]);
+  }
 
-    if ( n > max_len ) {
-        fprintf(stderr, "FATAL: the maximum length is %d\n", max_len);
-        return EXIT_FAILURE;
-    }
-    
-    const size_t size = n * sizeof(*x);
+  if ( n > max_len ) {
+    fprintf(stderr, "FATAL: the maximum length is %d\n", max_len);
+    return EXIT_FAILURE;
+  }
 
-    /* Allocate space for x on host */
-    x = (int*)malloc(size); assert(x);
-    fill(x, n);
+  const size_t size = n * sizeof(*x);
 
-    tstart = hpc_gettime();
-    for (phase = 0; phase < n; phase++) {
-        odd_even_step(x, n, phase);
-    }
-    elapsed = hpc_gettime() - tstart;
-    printf("Sorted %d elements in %f seconds\n", n, elapsed);        
+  /* Allocate space for x on host */
+  x = (int*)malloc(size); assert(x);
+  fill(x, n);
 
-    /* Check result */
-    check(x, n);
+  cudaMalloc((void **)&d_x, size);
+  cudaMemcpy(d_x, x, size, cudaMemcpyHostToDevice);
 
-    /* Cleanup */
-    free(x);
+  tstart = hpc_gettime();
+  for (phase = 0; phase < n; phase++) {
+    //odd_even_step_bad<<<(n + BLKSIZE - 1) / BLKSIZE, BLKSIZE>>>(d_x, n, phase);
+    odd_even_step_good<<<(n/2 + BLKSIZE - 1) / BLKSIZE, BLKSIZE>>>(d_x, n, phase);
+  }
+  cudaDeviceSynchronize();
 
-    return EXIT_SUCCESS;
+  elapsed = hpc_gettime() - tstart;
+  printf("Sorted %d elements in %f seconds\n", n, elapsed);
+
+  cudaMemcpy(x, d_x, size, cudaMemcpyDeviceToHost);
+
+  /* Check result */
+  check(x, n);
+
+  /* Cleanup */
+  cudaFree(d_x);
+  free(x);
+
+  return EXIT_SUCCESS;
 }
