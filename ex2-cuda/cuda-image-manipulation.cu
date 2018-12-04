@@ -111,8 +111,7 @@ __global__ void rotate_clockwise( unsigned char *orig, unsigned char *rotated, i
 
 
   if (x < n && y < n) {
-    rotated[(n - x - 1) * n + y] = orig[x * n + y];
-    rotated[x * n + y] = orig[(n - x - 1) * n + y];
+    rotated[x + n*y] = orig[n - y  - 1 + n*x];
   }
 }
 
@@ -125,8 +124,7 @@ __global__ void vertical_flip( unsigned char *orig, unsigned char *flipped, int 
   const int x = threadIdx.x + blockIdx.x * blockDim.x;
   const int y = threadIdx.y + blockIdx.y * blockDim.y;
 
-
-  if (x < n && y < n) {
+  if (x < n / 2 && y < n) {
     flipped[(n - x - 1) * n + y] = orig[x * n + y];
     flipped[x * n + y] = orig[(n - x - 1) * n + y];
   }
@@ -141,10 +139,9 @@ __global__ void horizontal_flip( unsigned char *orig, unsigned char *flipped, in
   const int x = threadIdx.x + blockIdx.x * blockDim.x;
   const int y = threadIdx.y + blockIdx.y * blockDim.y;
 
-
-  if (x < n && y < n) {
-    flipped[(n - y - 1) * n + x] = orig[y * n + x];
-    flipped[y * n + x] = orig[(n - y - 1) * n + x];
+  if (x < n && y < n / 2) {
+    flipped[y * n + x] = orig[y * n + (n - 1 - x)];
+    flipped[y * n + (n - 1 - x)] = orig[y * n + x];
   }
 }
 
