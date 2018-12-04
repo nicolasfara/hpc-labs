@@ -29,8 +29,12 @@
  *
  ****************************************************************************/
 
+#include "hpc.h"
 #include <stdio.h>
 #include <stdlib.h>
+
+
+#define BLKSIZE 1024
 
 typedef unsigned char cell_t;
 
@@ -48,19 +52,36 @@ typedef unsigned char cell_t;
  * +---+-------------------------+---+
  *
  */
-void step( cell_t *cur, cell_t *next, int ext_n )
+
+__global__ void step_kernel(cell_t *cur, cell_t *next, int ext_n)
 {
-    int i;
-    for (i=1; i<ext_n-1; i++) {
-        const cell_t left   = cur[i-1];
-        const cell_t center = cur[i  ];
-        const cell_t right  = cur[i+1];
-        next[i] = 
-            ( left && !center && !right) ||
-            (!left && !center &&  right) ||
-            (!left &&  center && !right) ||
-            (!left &&  center &&  right);
+  __shared__ cell_t buf[BLKSIZE + 2];
+  const int gi = threadIdx.x + blockIdx.x * blockDim.x + 1;
+  const int li = threadIdx.x + 1;
+  if (gi < ext_n - 1) {
+    buf[li] = cur[gi];
+    if (li == 1) {
+      buf[0] = cur[gi - 1];
+      buf[BLKSIZE + 1] = cur[gi + BLKSIZE];
     }
+
+    __syncthreads();
+
+    const cell_t left   = buf[li-1];
+    const cell_t center = buf[li  ];
+    const cell_t right  = buf[li+1];
+    next[gi] =
+      (left && !center && !right) ||
+      (!left && !center &&  right) ||
+      (!left &&  center && !right) ||
+      (!left &&  center &&  right);
+  }
+}
+
+__global__ void fill_ghost(cell_t *d_cur, int ext_n)
+{
+  d_cur[ext_n - 1] = d_cur[1];
+  d_cur[0] = d_cur[ext_n - 2];
 }
 
 /**
@@ -70,11 +91,11 @@ void step( cell_t *cur, cell_t *next, int ext_n )
  */
 void init_domain( cell_t *cur, int ext_n )
 {
-    int i;
-    for (i=0; i<ext_n; i++) {
-        cur[i] = 0;
-    }
-    cur[ext_n/2] = 1;
+  int i;
+  for (i=0; i<ext_n; i++) {
+    cur[i] = 0;
+  }
+  cur[ext_n/2] = 1;
 }
 
 /**
@@ -83,76 +104,93 @@ void init_domain( cell_t *cur, int ext_n )
  */
 void dump_state( FILE *out, const cell_t *cur, int ext_n )
 {
-    int i;
-    for (i=1; i < ext_n-1; i++) {
-        fprintf(out, "%d ", cur[i]);
-    }
-    fprintf(out, "\n");
+  int i;
+  for (i=1; i < ext_n-1; i++) {
+    fprintf(out, "%d ", cur[i]);
+  }
+  fprintf(out, "\n");
 }
 
 int main( int argc, char* argv[] )
 {
-    const char *outname = "rule30.pbm";
-    FILE *out;
-    int width = 1024, steps = 1024, s;    
-    cell_t *cur, *next;
-    
-    if ( argc > 3 ) {
-        fprintf(stderr, "Usage: %s [width [steps]]\n", argv[0]);
-        return EXIT_FAILURE;
-    }
+  const char *outname = "rule30.pbm";
+  FILE *out;
+  int width = 1024, steps = 1024, s;
+  cell_t *cur;
+  cell_t *d_cur, *d_next;
 
-    if ( argc > 1 ) {
-        width = atoi(argv[1]);
-    }
+  if ( argc > 3 ) {
+    fprintf(stderr, "Usage: %s [width [steps]]\n", argv[0]);
+    return EXIT_FAILURE;
+  }
 
-    if ( argc > 2 ) {
-        steps = atoi(argv[2]);
-    }
+  if ( argc > 1 ) {
+    width = atoi(argv[1]);
+  }
 
-    const int ext_width = width + 2;
-    const size_t ext_size = ext_width * sizeof(*cur); /* includes ghost cells */
-    
-    /* Create the output file */
-    out = fopen(outname, "w");
-    if ( !out ) {
-        fprintf(stderr, "FATAL: cannot create file \"%s\"\n", outname);
-        return EXIT_FAILURE;
-    }
-    fprintf(out, "P1\n");
-    fprintf(out, "# produced by %s %d %d\n", argv[0], width, steps);
-    fprintf(out, "%d %d\n", width, steps);
+  if ( argc > 2 ) {
+    steps = atoi(argv[2]);
+  }
 
-    /* Allocate space for the cur[] and next[] arrays */
-    cur = (cell_t*)malloc(ext_size);    
-    next = (cell_t*)malloc(ext_size);
+  if (width % BLKSIZE) {
+    fprintf(stderr, "width must be multiple of BLKSIZE\n");
+    return EXIT_FAILURE;
+  }
 
-    /* Initialize the domain */
-    init_domain(cur, ext_width);
-    
-    /* Evolve the CA */
-    for (s=0; s<steps; s++) {
+  const int ext_width = width + 2;
+  const size_t ext_size = ext_width * sizeof(*cur); /* includes ghost cells */
 
-        /* Dump the current state */
-        dump_state(out, cur, ext_width);
+  /* Create the output file */
+  out = fopen(outname, "w");
+  if ( !out ) {
+    fprintf(stderr, "FATAL: cannot create file \"%s\"\n", outname);
+    return EXIT_FAILURE;
+  }
+  fprintf(out, "P1\n");
+  fprintf(out, "# produced by %s %d %d\n", argv[0], width, steps);
+  fprintf(out, "%d %d\n", width, steps);
 
-        /* Fill ghost cells */
-        cur[ext_width-1] = cur[1];
-        cur[0] = cur[ext_width-2];
-        
-        /* Compute next state */
-        step(cur, next, ext_width);
+  /* Allocate space for the cur[] and next[] arrays */
+  cur = (cell_t*)malloc(ext_size);
+  CudaSafeCall(cudaMalloc((void **)&d_cur, ext_size));
+  CudaSafeCall(cudaMalloc((void **)&d_next, ext_size));
 
-        /* swap cur and next */
-        cell_t *tmp = cur;
-        cur = next;
-        next = tmp;
-    }
-    
-    free(cur);
-    free(next);
+  /* Initialize the domain */
+  init_domain(cur, ext_width);
 
-    fclose(out);
-    
-    return EXIT_SUCCESS;
+  CudaSafeCall(cudaMemcpy(d_cur, cur, ext_size, cudaMemcpyHostToDevice));
+
+  /* Evolve the CA */
+  for (s=0; s<steps; s++) {
+
+    /* Dump the current state */
+    dump_state(out, cur, ext_width);
+
+    /* Fill ghost cells */
+    /*
+    cur[ext_width-1] = cur[1];
+    cur[0] = cur[ext_width-2];
+    */
+    fill_ghost<<<1, 1>>>(d_cur, ext_width);
+    CudaCheckError();
+
+    /* Compute next state */
+    step_kernel<<<(width + BLKSIZE - 1) / BLKSIZE, BLKSIZE>>>(d_cur, d_next, ext_width);
+    CudaCheckError();
+
+    CudaSafeCall(cudaMemcpy(cur, d_cur, ext_size, cudaMemcpyDeviceToHost));
+
+    /* swap cur and next */
+    cell_t *tmp = d_cur;
+    d_cur = d_next;
+    d_next = tmp;
+  }
+
+  free(cur);
+  cudaFree(d_cur);
+  cudaFree(d_next);
+
+  fclose(out);
+
+  return EXIT_SUCCESS;
 }

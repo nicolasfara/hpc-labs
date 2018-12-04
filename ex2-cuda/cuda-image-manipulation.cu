@@ -32,10 +32,10 @@
 #define BLKSIZE 32
 
 typedef struct {
-    int width;   /* Width of the image (in pixels) */
-    int height;  /* Height of the image (in pixels) */
-    int maxgrey; /* Don't care (used only by the PGM read/write routines) */
-    unsigned char *bmap; /* buffer of width*height bytes; each byte represents a pixel */
+  int width;   /* Width of the image (in pixels) */
+  int height;  /* Height of the image (in pixels) */
+  int maxgrey; /* Don't care (used only by the PGM read/write routines) */
+  unsigned char *bmap; /* buffer of width*height bytes; each byte represents a pixel */
 } img_t;
 
 /**
@@ -44,37 +44,37 @@ typedef struct {
  */
 void read_pgm( FILE *f, img_t* img )
 {
-    char buf[1024];
-    const size_t BUFSIZE = sizeof(buf);
-    char *s; 
-    int nread;
+  char buf[1024];
+  const size_t BUFSIZE = sizeof(buf);
+  char *s; 
+  int nread;
 
-    /* Get the file type (must be "P5") */
+  /* Get the file type (must be "P5") */
+  s = fgets(buf, BUFSIZE, f);
+  if (0 != strcmp(s, "P5\n")) {
+    fprintf(stderr, "FATAL: wrong file type %s\n", buf);
+    exit(EXIT_FAILURE);
+  }
+  /* Get any comment and ignore it; does not work if there are
+     leading spaces in the comment line */
+  do {
     s = fgets(buf, BUFSIZE, f);
-    if (0 != strcmp(s, "P5\n")) {
-        fprintf(stderr, "FATAL: wrong file type %s\n", buf);
-        exit(EXIT_FAILURE);
-    }
-    /* Get any comment and ignore it; does not work if there are
-       leading spaces in the comment line */
-    do {
-        s = fgets(buf, BUFSIZE, f);
-    } while (s[0] == '#');
-    sscanf(s, "%d %d", &(img->width), &(img->height));
-    /* get maxgrey; must be less than or equal to 255 */
-    s = fgets(buf, BUFSIZE, f);
-    sscanf(s, "%d", &(img->maxgrey));
-    if ( img->maxgrey > 255 ) {
-        fprintf(stderr, "FATAL: maxgray > 255 (%d)\n", img->maxgrey);
-        exit(EXIT_FAILURE);
-    }
-    /* Get the binary data */
-    img->bmap = (unsigned char*)malloc((img->width)*(img->height));
-    nread = fread(img->bmap, 1, (img->width)*(img->height), f);
-    if ( (img->width)*(img->height) != nread ) {
-        fprintf(stderr, "FATAL: error reading input: expecting %d bytes, got %d\n", (img->width)*(img->height), nread);
-        exit(EXIT_FAILURE);
-    }
+  } while (s[0] == '#');
+  sscanf(s, "%d %d", &(img->width), &(img->height));
+  /* get maxgrey; must be less than or equal to 255 */
+  s = fgets(buf, BUFSIZE, f);
+  sscanf(s, "%d", &(img->maxgrey));
+  if ( img->maxgrey > 255 ) {
+    fprintf(stderr, "FATAL: maxgray > 255 (%d)\n", img->maxgrey);
+    exit(EXIT_FAILURE);
+  }
+  /* Get the binary data */
+  img->bmap = (unsigned char*)malloc((img->width)*(img->height));
+  nread = fread(img->bmap, 1, (img->width)*(img->height), f);
+  if ( (img->width)*(img->height) != nread ) {
+    fprintf(stderr, "FATAL: error reading input: expecting %d bytes, got %d\n", (img->width)*(img->height), nread);
+    exit(EXIT_FAILURE);
+  }
 }
 
 /**
@@ -82,11 +82,11 @@ void read_pgm( FILE *f, img_t* img )
  */
 void write_pgm( FILE *f, const img_t* img )
 {
-    fprintf(f, "P5\n");
-    fprintf(f, "# produced by cuda-image-manipulation\n");
-    fprintf(f, "%d %d\n", img->width, img->height);
-    fprintf(f, "%d\n", img->maxgrey);
-    fwrite(img->bmap, 1, (img->width)*(img->height), f);
+  fprintf(f, "P5\n");
+  fprintf(f, "# produced by cuda-image-manipulation\n");
+  fprintf(f, "%d %d\n", img->width, img->height);
+  fprintf(f, "%d\n", img->maxgrey);
+  fwrite(img->bmap, 1, (img->width)*(img->height), f);
 }
 
 /**
@@ -94,9 +94,9 @@ void write_pgm( FILE *f, const img_t* img )
  */
 void free_pgm( img_t *img )
 {
-    img->width = img->height = img->maxgrey = -1;
-    free(img->bmap);
-    img->bmap = NULL;
+  img->width = img->height = img->maxgrey = -1;
+  free(img->bmap);
+  img->bmap = NULL;
 }
 
 /**
@@ -105,7 +105,15 @@ void free_pgm( img_t *img )
  */
 __global__ void rotate_clockwise( unsigned char *orig, unsigned char *rotated, int n )
 {
-    /* [TODO] Implement this kernel */
+  /* [TODO] Implement this kernel */
+  const int x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+
+  if (x < n && y < n) {
+    rotated[(n - x - 1) * n + y] = orig[x * n + y];
+    rotated[x * n + y] = orig[(n - x - 1) * n + y];
+  }
 }
 
 /**
@@ -113,7 +121,15 @@ __global__ void rotate_clockwise( unsigned char *orig, unsigned char *rotated, i
  */
 __global__ void vertical_flip( unsigned char *orig, unsigned char *flipped, int n )
 {
-    /* [TODO] Implement this kernel */
+  /* [TODO] Implement this kernel */
+  const int x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+
+  if (x < n && y < n) {
+    flipped[(n - x - 1) * n + y] = orig[x * n + y];
+    flipped[x * n + y] = orig[(n - x - 1) * n + y];
+  }
 }
 
 /**
@@ -121,67 +137,79 @@ __global__ void vertical_flip( unsigned char *orig, unsigned char *flipped, int 
  */
 __global__ void horizontal_flip( unsigned char *orig, unsigned char *flipped, int n )
 {
-    /* [TODO] Implement this kernel */
+  /* [TODO] Implement this kernel */
+  const int x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+
+  if (x < n && y < n) {
+    flipped[(n - y - 1) * n + x] = orig[y * n + x];
+    flipped[y * n + x] = orig[(n - y - 1) * n + x];
+  }
 }
 
 int main( int argc, char* argv[] )
 {
-    img_t bmap;
-    unsigned char *d_orig, *d_new, *tmp;
-    double tstart, elapsed;
-    int op;
-    enum {
-        OP_ROTATE = 1,
-        OP_V_FLIP = 2,
-        OP_H_FLIP = 4
-    };
+  img_t bmap;
+  unsigned char *d_orig, *d_new, *tmp;
+  double tstart, elapsed;
+  int op;
+  enum {
+    OP_ROTATE = 1,
+    OP_V_FLIP = 2,
+    OP_H_FLIP = 4
+  };
 
-    if ( argc != 2 ) {
-        fprintf(stderr, "Usage: %s op < input_file\nop = %d (rotate clockwise), %d (vertical flip), %d (horizontal flip)", argv[0], OP_ROTATE, OP_V_FLIP, OP_H_FLIP);
-        return EXIT_FAILURE;
-    }
-    op = atoi(argv[1]);
-    read_pgm(stdin, &bmap);   
-    if ( bmap.width != bmap.height ) {
-        fprintf(stderr, "FATAL: width (%d) and height (%d) of the input image must be equal\n", bmap.width, bmap.height);
-        return EXIT_FAILURE;
-    }
-    const int n = bmap.width;
-    
-    /* Allocate images on device */
-    const size_t size = n*n;
-    CudaSafeCall( cudaMalloc((void **)&d_orig, size) );
-    CudaSafeCall( cudaMalloc((void **)&d_new, size) );
+  if ( argc != 2 ) {
+    fprintf(stderr, "Usage: %s op < input_file\nop = %d (rotate clockwise), %d (vertical flip), %d (horizontal flip)", argv[0], OP_ROTATE, OP_V_FLIP, OP_H_FLIP);
+    return EXIT_FAILURE;
+  }
+  op = atoi(argv[1]);
+  read_pgm(stdin, &bmap);
+  if ( bmap.width != bmap.height ) {
+    fprintf(stderr, "FATAL: width (%d) and height (%d) of the input image must be equal\n", bmap.width, bmap.height);
+    return EXIT_FAILURE;
+  }
+  const int n = bmap.width;
 
-    /* Copy input to device */
-    CudaSafeCall( cudaMemcpy(d_orig, bmap.bmap, size, cudaMemcpyHostToDevice) );
-    const dim3 block(BLKSIZE, BLKSIZE);
-    const dim3 grid((n + BLKSIZE - 1)/BLKSIZE, (n + BLKSIZE - 1)/BLKSIZE);
+  /* Allocate images on device */
+  const size_t size = n*n;
+  CudaSafeCall( cudaMalloc((void **)&d_orig, size) );
+  CudaSafeCall( cudaMalloc((void **)&d_new, size) );
 
-    tstart = hpc_gettime();
-    if (op & OP_ROTATE) {
-        rotate_clockwise<<< grid, block >>>( d_orig, d_new, n);
-        CudaCheckError();
-        tmp = d_orig; d_orig = d_new; d_new = tmp;
-    }
-    if (op & OP_V_FLIP) {
-        vertical_flip<<< grid, block >>>( d_orig, d_new, n);
-        CudaCheckError();
-        tmp = d_orig; d_orig = d_new; d_new = tmp;
-    }
-    if (op & OP_H_FLIP) {
-        horizontal_flip<<< grid, block >>>( d_orig, d_new, n);
-        CudaCheckError();
-        tmp = d_orig; d_orig = d_new; d_new = tmp;
-    }
-    cudaDeviceSynchronize();
-    elapsed = hpc_gettime() - tstart;
-    /* Copy output to host */
-    cudaMemcpy(bmap.bmap, d_orig, size, cudaMemcpyDeviceToHost);
-    fprintf(stderr, "Execution time: %f\n", elapsed);
-    write_pgm(stdout, &bmap);
-    free_pgm(&bmap);
-    cudaFree(d_orig);
-    cudaFree(d_new);
-    return EXIT_SUCCESS;
+  /* Copy input to device */
+  CudaSafeCall( cudaMemcpy(d_orig, bmap.bmap, size, cudaMemcpyHostToDevice) );
+  const dim3 block(BLKSIZE, BLKSIZE);
+  const dim3 grid((n + BLKSIZE - 1)/BLKSIZE, (n + BLKSIZE - 1)/BLKSIZE);
+
+  tstart = hpc_gettime();
+  if (op & OP_ROTATE) {
+    fprintf(stderr, "Select 1\n");
+    rotate_clockwise<<< grid, block >>>( d_orig, d_new, n);
+    CudaCheckError();
+    tmp = d_orig; d_orig = d_new; d_new = tmp;
+  }
+  if (op & OP_V_FLIP) {
+    fprintf(stderr, "Select 2\n");
+    vertical_flip<<< grid, block >>>( d_orig, d_new, n);
+    CudaCheckError();
+    tmp = d_orig; d_orig = d_new; d_new = tmp;
+  }
+  if (op & OP_H_FLIP) {
+    fprintf(stderr, "Select 4\n");
+    horizontal_flip<<< grid, block >>>( d_orig, d_new, n);
+    CudaCheckError();
+    tmp = d_orig; d_orig = d_new; d_new = tmp;
+  }
+
+  cudaDeviceSynchronize();
+  elapsed = hpc_gettime() - tstart;
+  /* Copy output to host */
+  cudaMemcpy(bmap.bmap, d_orig, size, cudaMemcpyDeviceToHost);
+  fprintf(stderr, "Execution time: %f\n", elapsed);
+  write_pgm(stdout, &bmap);
+  free_pgm(&bmap);
+  cudaFree(d_orig);
+  cudaFree(d_new);
+  return EXIT_SUCCESS;
 }
