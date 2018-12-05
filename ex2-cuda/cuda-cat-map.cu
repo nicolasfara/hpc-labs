@@ -42,12 +42,14 @@
 #include <string.h>
 #include <assert.h>
 
+#define BLKSIZE 32
+
 
 typedef struct {
-    int width;   /* Width of the image (in pixels) */
-    int height;  /* Height of the image (in pixels) */
-    int maxgrey; /* Don't care (used only by the PGM read/write routines) */
-    unsigned char *bmap; /* buffer of width*height bytes; each byte represents a pixel */
+  int width;   /* Width of the image (in pixels) */
+  int height;  /* Height of the image (in pixels) */
+  int maxgrey; /* Don't care (used only by the PGM read/write routines) */
+  unsigned char *bmap; /* buffer of width*height bytes; each byte represents a pixel */
 } img_t;
 
 /**
@@ -57,37 +59,37 @@ typedef struct {
  */
 void read_pgm( FILE *f, img_t* img )
 {
-    char buf[1024];
-    const size_t BUFSIZE = sizeof(buf);
-    char *s; 
-    int nread;
+  char buf[1024];
+  const size_t BUFSIZE = sizeof(buf);
+  char *s; 
+  int nread;
 
-    /* Get the file type (must be "P5") */
+  /* Get the file type (must be "P5") */
+  s = fgets(buf, BUFSIZE, f);
+  if (0 != strcmp(s, "P5\n")) {
+    fprintf(stderr, "FATAL: wrong file type %s\n", buf);
+    exit(EXIT_FAILURE);
+  }
+  /* Get any comment and ignore it; does not work if there are
+     leading spaces in the comment line */
+  do {
     s = fgets(buf, BUFSIZE, f);
-    if (0 != strcmp(s, "P5\n")) {
-        fprintf(stderr, "FATAL: wrong file type %s\n", buf);
-        exit(EXIT_FAILURE);
-    }
-    /* Get any comment and ignore it; does not work if there are
-       leading spaces in the comment line */
-    do {
-        s = fgets(buf, BUFSIZE, f);
-    } while (s[0] == '#');
-    sscanf(s, "%d %d", &(img->width), &(img->height));
-    /* get maxgrey; must be less than or equal to 255 */
-    s = fgets(buf, BUFSIZE, f);
-    sscanf(s, "%d", &(img->maxgrey));
-    if ( img->maxgrey > 255 ) {
-        fprintf(stderr, "FATAL: maxgray > 255 (%d)\n", img->maxgrey);
-        exit(EXIT_FAILURE);
-    }
-    /* Get the binary data */
-    img->bmap = (unsigned char*)malloc((img->width)*(img->height));
-    nread = fread(img->bmap, 1, (img->width)*(img->height), f);
-    if ( (img->width)*(img->height) != nread ) {
-        fprintf(stderr, "FATAL: error reading input: expecting %d bytes, got %d\n", (img->width)*(img->height), nread);
-        exit(EXIT_FAILURE);
-    }
+  } while (s[0] == '#');
+  sscanf(s, "%d %d", &(img->width), &(img->height));
+  /* get maxgrey; must be less than or equal to 255 */
+  s = fgets(buf, BUFSIZE, f);
+  sscanf(s, "%d", &(img->maxgrey));
+  if ( img->maxgrey > 255 ) {
+    fprintf(stderr, "FATAL: maxgray > 255 (%d)\n", img->maxgrey);
+    exit(EXIT_FAILURE);
+  }
+  /* Get the binary data */
+  img->bmap = (unsigned char*)malloc((img->width)*(img->height));
+  nread = fread(img->bmap, 1, (img->width)*(img->height), f);
+  if ( (img->width)*(img->height) != nread ) {
+    fprintf(stderr, "FATAL: error reading input: expecting %d bytes, got %d\n", (img->width)*(img->height), nread);
+    exit(EXIT_FAILURE);
+  }
 }
 
 /**
@@ -95,11 +97,11 @@ void read_pgm( FILE *f, img_t* img )
  */
 void write_pgm( FILE *f, const img_t* img )
 {
-    fprintf(f, "P5\n");
-    fprintf(f, "# produced by cuda-cat-map\n");
-    fprintf(f, "%d %d\n", img->width, img->height);
-    fprintf(f, "%d\n", img->maxgrey);
-    fwrite(img->bmap, 1, (img->width)*(img->height), f);
+  fprintf(f, "P5\n");
+  fprintf(f, "# produced by cuda-cat-map\n");
+  fprintf(f, "%d %d\n", img->width, img->height);
+  fprintf(f, "%d\n", img->maxgrey);
+  fwrite(img->bmap, 1, (img->width)*(img->height), f);
 }
 
 /**
@@ -107,9 +109,9 @@ void write_pgm( FILE *f, const img_t* img )
  */
 void free_pgm( img_t *img )
 {
-    img->width = img->height = img->maxgrey = -1;
-    free(img->bmap);
-    img->bmap = NULL;
+  img->width = img->height = img->maxgrey = -1;
+  free(img->bmap);
+  img->bmap = NULL;
 }
 
 
@@ -126,53 +128,65 @@ void free_pgm( img_t *img )
  * and vice-versa. At the end of the function, the temporary image
  * must be deallocated.
  */
-void cat_map( img_t* img, int k )
+__global__ void cat_map(unsigned char* cur, unsigned char *next, int N )
 {
-    const int N = img->width;
-    const size_t size = N * N * sizeof(img->bmap[0]);
 
-    /* [TODO] Modify the body of this function to allocate device memory,
-       do the appropriate data transfer, and launch a kernel */
-    unsigned char *cur = img->bmap;
-    unsigned char *next = (unsigned char*)malloc( size );
+  /* [TODO] Modify the body of this function to allocate device memory,
+     do the appropriate data transfer, and launch a kernel */
 
-    for (int i=0; i<k; i++) {
-        for (int y=0; y<N; y++) {
-            for (int x=0; x<N; x++) {
-                int xnext = (2*x+y) % N;
-                int ynext = (x + y) % N;
-                next[xnext + ynext*N] = cur[x+y*N];
-            }
-        }
-        /* Swap old and new */
-        unsigned char *tmp = cur;
-        cur = next;
-        next = tmp;
-    }
-    img->bmap = cur;
-    free(next);
+  const int x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < N && y < N) {
+    int xnext = (2*x+y) % N;
+    int ynext = (x + y) % N;
+    next[xnext + ynext*N] = cur[x+y*N];
+  }
 }
 
 int main( int argc, char* argv[] )
 {
-    img_t bmap;
-    int niter;
+  img_t bmap;
+  unsigned char *cur, *next;
+  int niter;
 
-    if ( argc != 2 ) {
-        fprintf(stderr, "Usage: %s niter < input_image > output_image\n", argv[0]);
-        return EXIT_FAILURE;
-    }
-    niter = atoi(argv[1]);
-    read_pgm(stdin, &bmap);
-    if ( bmap.width != bmap.height ) {
-        fprintf(stderr, "FATAL: width (%d) and height (%d) of the input image must be equal\n", bmap.width, bmap.height);
-        return EXIT_FAILURE;
-    }
-    const double tstart = hpc_gettime();
-    cat_map(&bmap, niter);
-    const double elapsed = hpc_gettime() - tstart;
-    fprintf(stderr, "Execution time: %f\n", elapsed);
-    write_pgm(stdout, &bmap);
-    free_pgm(&bmap);
-    return EXIT_SUCCESS;
+  if ( argc != 2 ) {
+    fprintf(stderr, "Usage: %s niter < input_image > output_image\n", argv[0]);
+    return EXIT_FAILURE;
+  }
+  niter = atoi(argv[1]);
+  read_pgm(stdin, &bmap);
+  if ( bmap.width != bmap.height ) {
+    fprintf(stderr, "FATAL: width (%d) and height (%d) of the input image must be equal\n", bmap.width, bmap.height);
+    return EXIT_FAILURE;
+  }
+
+  const int bytes = bmap.height * bmap.width;
+
+  CudaSafeCall(cudaMalloc((void **)&cur, bytes));
+  CudaSafeCall(cudaMalloc((void **)&next, bytes));
+  CudaSafeCall(cudaMemcpy(cur, bmap.bmap, bytes, cudaMemcpyHostToDevice));
+
+  const double tstart = hpc_gettime();
+  dim3 blk((bmap.width + BLKSIZE - 1) / BLKSIZE, (bmap.width + BLKSIZE - 1) / BLKSIZE);
+  dim3 thr(BLKSIZE, BLKSIZE);
+  for (int i = 0; i < niter; i++) {
+    cat_map<<<blk, thr>>>(cur, next, bmap.height);
+    cudaDeviceSynchronize();
+    unsigned char *tmp;
+    tmp = cur;
+    cur = next;
+    next = tmp;
+  }
+  CudaCheckError();
+  const double elapsed = hpc_gettime() - tstart;
+
+  CudaSafeCall(cudaMemcpy(bmap.bmap, cur, bytes, cudaMemcpyDeviceToHost));
+
+  fprintf(stderr, "Execution time: %f\n", elapsed);
+  write_pgm(stdout, &bmap);
+  free_pgm(&bmap);
+  cudaFree(cur);
+  cudaFree(next);
+  return EXIT_SUCCESS;
 }
