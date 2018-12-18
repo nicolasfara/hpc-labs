@@ -109,7 +109,6 @@ __global__ void rotate_clockwise( unsigned char *orig, unsigned char *rotated, i
   const int x = threadIdx.x + blockIdx.x * blockDim.x;
   const int y = threadIdx.y + blockIdx.y * blockDim.y;
 
-
   if (x < n && y < n) {
     rotated[x + n*y] = orig[n - y  - 1 + n*x];
   }
